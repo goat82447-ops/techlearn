@@ -5,7 +5,14 @@ const test = require("node:test");
 const mongodb = require("mongodb");
 const descriptor = Object.getOwnPropertyDescriptor(mongodb, "MongoClient");
 Object.defineProperty(mongodb, "MongoClient", { configurable: true, value: class {
-  async connect() { throw new Error("private connection details must not reach the browser"); }
+  async connect() {
+    const error = new Error("private connection details must not reach the browser");
+    error.name = "MongoServerSelectionError";
+    error.reason = { servers: new Map([["fixture", { error: Object.assign(new Error("private network detail"), {
+      code: "ETIMEDOUT",
+    }) }]]) };
+    throw error;
+  }
   async close() {}
 } });
 const handler = require("../api/account-auth");
@@ -36,7 +43,7 @@ test("unreachable MongoDB explains signup failure without a successful response,
   }
   assert.equal(res.statusCode, 503);
   assert.match(res.body.error, /cannot connect to MongoDB/);
-  assert.deepEqual(errors, [["Account auth MongoDB connection failed.", "Error"]]);
+  assert.deepEqual(errors, [["Account auth MongoDB connection failed.", "ETIMEDOUT"]]);
   assert.equal(res.body.signedIn, undefined);
   assert.equal(res.headers["set-cookie"], undefined);
   assert.doesNotMatch(JSON.stringify(res.body), /private connection details|memorable test passphrase/);

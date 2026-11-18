@@ -45,9 +45,11 @@ async function connect() {
         await client.close().catch(() => {});
         const failure = new Error("MongoDB account storage is unavailable.");
         const serverErrors = [...(error.reason?.servers?.values() || [])].map(server => server.error);
-        const denied = serverErrors.some(problem => problem?.code === "EACCES" || problem?.cause?.code === "EACCES");
-        const code = String(denied ? "EACCES" : error.code || error.name || "MONGO_CONNECTION_FAILED");
-        failure.code = /^[A-Za-z0-9_]{1,60}$/.test(code) ? code : "MONGO_CONNECTION_FAILED";
+        const serverCodes = serverErrors.flatMap(problem => [problem?.code, problem?.cause?.code]);
+        const candidates = serverCodes.includes("EACCES")
+          ? ["EACCES"] : [...serverCodes, error.code, error.name, "MONGO_CONNECTION_FAILED"];
+        failure.code = candidates.map(value => String(value))
+          .find(value => /^[A-Za-z0-9_]{1,60}$/.test(value));
         throw failure;
       }
     })().catch(error => { connection = null; throw error; });
