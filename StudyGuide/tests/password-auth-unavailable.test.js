@@ -4,12 +4,13 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const mongodb = require("mongodb");
 const descriptor = Object.getOwnPropertyDescriptor(mongodb, "MongoClient");
+let nestedTlsFailure = false;
 Object.defineProperty(mongodb, "MongoClient", { configurable: true, value: class {
   async connect() {
     const error = new Error("private connection details must not reach the browser");
     error.name = "MongoServerSelectionError";
     error.reason = { servers: new Map([["fixture", { error: Object.assign(new Error("private network detail"), {
-      code: "ETIMEDOUT",
+      ...(nestedTlsFailure ? { cause: { code: "ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR" } } : { code: "ETIMEDOUT" }),
     }) }]]) };
     throw error;
   }
@@ -47,4 +48,15 @@ test("unreachable MongoDB explains signup failure without a successful response,
   assert.equal(res.body.signedIn, undefined);
   assert.equal(res.headers["set-cookie"], undefined);
   assert.doesNotMatch(JSON.stringify(res.body), /private connection details|memorable test passphrase/);
+});
+
+test("nested TLS failures retain a useful sanitized code instead of the string undefined", async () => {
+  nestedTlsFailure = true;
+  Object.assign(process.env, { AUTH_PROVIDER: "mongodb", MONGODB_URI: "mongodb://fixture.invalid",
+    MONGODB_DATABASE: "fixture" });
+  await assert.rejects(require("../api/_mongo").connect(), error => {
+    assert.equal(error.code, "ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR");
+    assert.equal(error.message, "MongoDB account storage is unavailable.");
+    return true;
+  });
 });
