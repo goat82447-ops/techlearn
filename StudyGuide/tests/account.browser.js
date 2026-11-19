@@ -109,6 +109,8 @@ test("returning users log in with saved credentials and Sign out removes access"
   await page.locator("#login-password").fill("a memorable test passphrase");
   await page.locator("#password-login-form button").click();
   await page.locator("#account-dashboard:visible").waitFor();
+  await page.locator("[data-site-account]:visible").waitFor();
+  assert.equal(await page.locator("[data-site-account-name]").innerText(), "Hi, Learner");
   assert.equal(await page.locator("#account-current-role").innerText(), "Student");
   assert.equal(await page.locator("#account-current-plan").innerText(), "Free");
   assert.equal(await page.locator("#account-admin").isVisible(), false);
@@ -119,4 +121,38 @@ test("returning users log in with saved credentials and Sign out removes access"
   await page.locator("#password-account-panel:visible").waitFor();
   assert.equal(await page.locator("#account-dashboard").isVisible(), false);
   assert.equal(await page.locator("#account-admin").isVisible(), false);
+  assert.equal(await page.locator("[data-site-account]").isVisible(), false);
+});
+
+test("the header identifies the current user across pages and account changes without overflowing mobile layouts", async t => {
+  const { page, base } = await openSite(t);
+  let username = "FirstLearner";
+  await page.route("**/api/session", route => route.fulfill({ json: {
+    provider: "mongodb", signedIn: Boolean(username),
+    ...(username ? { user: { username, role: "student", hasPassword: true }, plan: "Free" } : {}),
+  } }));
+  await page.goto(base);
+  const identity = page.locator("[data-site-account]");
+  await identity.waitFor({ state: "visible" });
+  assert.equal(await identity.innerText(), "Hi, FirstLearner");
+  assert.equal(await identity.getAttribute("href"), "/Account.html");
+  assert.equal(await page.locator("#site-primary-navigation").isVisible(), false);
+  await page.goto(`${base}/Subjects.html`);
+  await identity.waitFor({ state: "visible" });
+  assert.equal(await identity.innerText(), "Hi, FirstLearner");
+
+  username = "SecondLearnerWithALongAccountName";
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForFunction(name => document.querySelector("[data-site-account-name]").textContent === `Hi, ${name}`, username);
+  assert.equal(await identity.getAttribute("aria-label"), `Signed in as ${username}. Open account.`);
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await identity.isVisible(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${width}px`);
+  }
+
+  username = "";
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await identity.waitFor({ state: "hidden" });
+  assert.equal(await page.locator("[data-site-account-name]").textContent(), "");
 });
